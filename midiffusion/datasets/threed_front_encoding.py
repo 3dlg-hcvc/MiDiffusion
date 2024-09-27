@@ -30,7 +30,7 @@ class Diffusion(DatasetDecoratorBase):
         # Compute the target from the input
         for k, v in sample_params.items():
             if k in [
-                "room_layout", "length", "fpbpn"
+                "room_layout", "length", "fpbpn", "room_type"
             ]:
                 pass
 
@@ -48,7 +48,7 @@ class Diffusion(DatasetDecoratorBase):
                 sample_params_target[k] = np.vstack([
                     class_labels, 
                     np.tile(empty_label[None, :], [self._max_length - L, 1])
-                ]).astype(np.float32) * 2.0 - 1.0 
+                ]).astype(np.float32) * 2.0 - 1.0
 
             else:
                 # Set the attributes for the 'empty' label

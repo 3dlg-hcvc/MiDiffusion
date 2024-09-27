@@ -75,7 +75,7 @@ class MixedDenoiseTransformer(DenoiseTransformer):
             self.init_mlp = self._encoder_mlp(geo_embd, self.geo_dim)
             self.geo_hidden2output = self._decoder_mlp(decode_embd, self.geo_dim)
     
-    def forward(self, x_semantic, x_geometry, time, context=None, context_cross=None): 
+    def forward(self, x_semantic, x_geometry, time, context=None, context_cross=None, room_type_context=None):
         # x: (B, N, C)
         if context_cross is not None:
             raise NotImplemented    # TODO
@@ -112,7 +112,7 @@ class MixedDenoiseTransformer(DenoiseTransformer):
 
         # transformer
         for block_idx in range(len(self.tf_blocks)):
-            x = self.tf_blocks[block_idx](x, time, context)
+            x = self.tf_blocks[block_idx](x, time, context, room_type_context=room_type_context)
 
         # final processing
         out_class = self.to_logits(x)

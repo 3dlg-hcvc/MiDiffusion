@@ -28,6 +28,7 @@ class _AdaNorm(nn.Module):
         assert n_embd % 2 == 0
         if "abs" in emb_type:
             self.emb = SinusoidalPosEmb(n_embd, num_steps=max_timestep)
+            self.room_type_emb = SinusoidalPosEmb(n_embd, num_steps=max_timestep)
         elif "mlp" in emb_type:
             self.emb = nn.Sequential(
                 Rearrange("b -> b 1"),
@@ -35,10 +36,18 @@ class _AdaNorm(nn.Module):
                 nn.ReLU(),
                 nn.Linear(n_embd // 2, n_embd),
             )
+            self.room_type_emb = nn.Sequential(
+                Rearrange("b -> b 1"),
+                nn.Linear(1, n_embd // 2),
+                nn.ReLU(),
+                nn.Linear(n_embd // 2, n_embd),
+            )
         else:
             self.emb = nn.Embedding(max_timestep, n_embd)
+            self.room_type_emb = nn.Embedding(max_timestep, n_embd)
         self.silu = nn.SiLU()
         self.linear = nn.Linear(n_embd, n_embd * 2)
+        self.room_type_linear = nn.Linear(n_embd, n_embd * 2)
 
 
 class AdaLayerNorm(_AdaNorm):
@@ -49,9 +58,11 @@ class AdaLayerNorm(_AdaNorm):
         super().__init__(n_embd, max_timestep, emb_type)
         self.layernorm = nn.LayerNorm(n_embd, eps=LAYER_NROM_EPS, elementwise_affine=False)
 
-    def forward(self, x: Tensor, timestep: Tensor):
+    def forward(self, x: Tensor, timestep: Tensor, room_type_context=None):
         # (B, N, n_embd),(B,) -> (B, N, n_embd)
         emb = self.linear(self.silu(self.emb(timestep))).unsqueeze(1)   # B, 1, 2*n_embd
+        room_type_emb = self.room_type_linear(self.silu(self.room_type_emb(room_type_context))).unsqueeze(1) if room_type_context is not None else 0
+        emb = emb + room_type_emb
         scale, shift = torch.chunk(emb, 2, dim=2)
         x = self.layernorm(x) * (1 + scale) + shift
         return x
@@ -65,9 +76,12 @@ class AdaInsNorm(_AdaNorm):
         super().__init__(n_embd, max_timestep, emb_type)
         self.instancenorm = nn.InstanceNorm1d(n_embd, eps=LAYER_NROM_EPS)
 
-    def forward(self, x: Tensor, timestep: Tensor):
+    def forward(self, x: Tensor, timestep: Tensor, room_type_context=None):
         # (B, N, n_embd),(B,) -> (B, N, n_embd)
         emb = self.linear(self.silu(self.emb(timestep))).unsqueeze(1)   # B, 1, 2*n_embd
+        room_type_emb = self.room_type_linear(self.silu(self.room_type_emb(room_type_context))).unsqueeze(
+            1) if room_type_context is not None else 0
+        emb = emb + room_type_emb
         scale, shift = torch.chunk(emb, 2, dim=2)
         x = self.instancenorm(x.transpose(-1, -2)).transpose(-1, -2) * (1 + scale) \
             + shift
@@ -172,16 +186,16 @@ class Block(nn.Module):
                 nn.Dropout(dropout),
             )
 
-    def forward(self, x, timestep, cond_output=None, mask=None):    
+    def forward(self, x, timestep, cond_output=None, mask=None, room_type_context=None):
         if self.attn_type == "self":
-            x = x + self.attn(self.ln1(x, timestep), attn_mask=mask)
+            x = x + self.attn(self.ln1(x, timestep, room_type_context), attn_mask=mask)
             x = x + self.mlp(self.ln2(x))
         elif self.attn_type == "selfcondition":
-            x = x + self.attn(self.ln1(x, timestep), attn_mask=mask)
+            x = x + self.attn(self.ln1(x, timestep, room_type_context), attn_mask=mask)
             x = x + self.mlp(self.ln2(x, cond_output))
         elif self.attn_type == "selfcross":
-            x = x + self.attn1(self.ln1(x, timestep), attn_mask=mask)
-            x = x + self.attn2(self.ln1_1(x, timestep), cond_output, attn_mask=mask)
+            x = x + self.attn1(self.ln1(x, timestep, room_type_context), attn_mask=mask)
+            x = x + self.attn2(self.ln1_1(x, timestep, room_type_context), cond_output, attn_mask=mask)
             x = x + self.mlp(self.ln2(x))
         else:
             return NotImplemented

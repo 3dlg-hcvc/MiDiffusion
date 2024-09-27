@@ -55,10 +55,15 @@ class DiffusionSceneLayout_Mixed(DiffusionSceneLayout_DDPM):
             room_layout_target[:, :, :self.bbox_dim], 
             room_layout_target[:, :, self.bbox_dim+self.class_dim:]
         ], dim=-1).contiguous()
+
+        if "room_type" in sample_params.keys():
+            room_type_con = sample_params["room_type"]
+        else:
+            room_type_con = None
         
         # denoise loss function
         loss, loss_dict = self.diffusion.get_loss_iter(
-            semantic_target, geometric_target, condition=condition
+            semantic_target, geometric_target, condition=condition, room_type_con=room_type_con
         )
         return loss, loss_dict
 

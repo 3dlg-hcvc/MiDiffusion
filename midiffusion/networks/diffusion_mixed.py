@@ -47,9 +47,9 @@ class MixedDiffusionPoint(nn.Module):
         # and output corresponding discrete and continuout predictions
         self.model = denoise_net
 
-    def _denoise(self, data_semantic, data_geometric, t, condition, out_type="all"):
+    def _denoise(self, data_semantic, data_geometric, t, condition, room_type_con, out_type="all"):
         out_class, out_bbox = \
-            self.model(data_semantic, data_geometric, t, condition)
+            self.model(data_semantic, data_geometric, t, condition, room_type_context=room_type_con)
         if out_type == "semantic":
             return out_class
         elif out_type == "geometric":
@@ -57,7 +57,7 @@ class MixedDiffusionPoint(nn.Module):
         else:
             return out_class, out_bbox
 
-    def get_loss_iter(self, data_semantic, data_geometric, condition=None):
+    def get_loss_iter(self, data_semantic, data_geometric, condition=None, room_type_con=None):
         B, N, C = data_geometric.shape
         device = data_geometric.device
         assert data_semantic.shape == (B, N)
@@ -82,7 +82,7 @@ class MixedDiffusionPoint(nn.Module):
 
         # Send x_t, t, condition through denoising net
         denoise_out_class, denoise_out_geometric = \
-            self.model(x_t_class, x_t_geometric, t, context=condition)
+            self.model(x_t_class, x_t_geometric, t, context=condition, room_type_context=room_type_con)
         
         # Compute loss
         feat_separated_losses = dict()  # loss.<feat_name>: <loss_per_scene>
