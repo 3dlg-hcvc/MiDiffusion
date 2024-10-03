@@ -128,11 +128,30 @@ def main(argv):
         not os.path.samefile(args.config_file, path_to_config):
         shutil.copyfile(args.config_file, path_to_config)
 
+    # todo: test with unified config; need to delete later
+    config["data"]["room_type_context"] = 0
+    room_type_context = config["data"]["room_type_context"]
+    # if "unified" in config["data"]["dataset_directory"]:
+    #     room_type_context = config["data"]["room_type_context"]
+    #     if room_type_context == 0:
+    #         config["data"]["dataset_directory"] = "bedroom"
+    #         config["data"]["annotation_file"].replace("unified", "bedroom")
+    #     elif room_type_context == 1:
+    #         config["data"]["dataset_directory"] = "livingroom"
+    #         config["data"]["annotation_file"].replace("unified", "livingroom")
+    #     elif room_type_context == 2:
+    #         config["data"]["dataset_directory"] = "diningroom"
+    #         config["data"]["annotation_file"].replace("unified", "diningroom")
+    # else:
+    #     room_type_context = None
+
+
     # Raw training data (for record keeping)
     raw_train_dataset = get_raw_dataset(
         update_data_file_paths(config["data"]), 
         split=config["training"].get("splits", ["train", "val"]),
-        include_room_mask=config["network"].get("room_mask_condition", True)
+        include_room_mask=config["network"].get("room_mask_condition", True),
+        generation=True, room_type=room_type_context
     ) 
 
     # Get Scaled dataset encoding (without data augmentation)
@@ -140,7 +159,8 @@ def main(argv):
         update_data_file_paths(config["data"]),
         split=config["validation"].get("splits", ["test"]),
         max_length=config["network"]["sample_num_points"],
-        include_room_mask=config["network"].get("room_mask_condition", True)
+        include_room_mask=config["network"].get("room_mask_condition", True),
+        generation=True, room_type=room_type_context
     )
     print("Loaded {} scenes with {} object types ({} labels):".format(
         len(encoded_dataset), encoded_dataset.n_object_types, encoded_dataset.n_classes))
@@ -156,7 +176,7 @@ def main(argv):
     sampled_indices, layout_list = generate_layouts(
         network, encoded_dataset, config, args.n_syn_scenes, "random",
         experiment=args.experiment, num_known_objects=args.n_known_objects, 
-        batch_size=args.batch_size, device=device
+        batch_size=args.batch_size, device=device, room_type_context=room_type_context
     )
     
     threed_front_results = ThreedFrontResults(

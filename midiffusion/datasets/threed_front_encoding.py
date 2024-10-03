@@ -84,10 +84,13 @@ def get_dataset_raw_and_encoded(
     split=["train", "val"],
     max_length=None,
     include_room_mask=True,
+    generation=False,
+    room_type=None
 ):
     dataset = get_raw_dataset(
         config, filter_fn, path_to_bounds, split, 
-        include_room_mask=include_room_mask
+        include_room_mask=include_room_mask,
+        generation=generation, room_type=room_type
     )
     encoding = dataset_encoding_factory(
         config.get("encoding_type"),

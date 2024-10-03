@@ -6,6 +6,7 @@ data:
     augmentations: ["fixed_rotations"]
     train_stats: "dataset_stats.txt"
     room_layout_size: "64,64"
+    room_type_context: 0 #0: bedroom. 1: living room, 2:dining room
 
 network:
     type: "diffusion_scene_layout_mixed"
@@ -70,7 +71,7 @@ training:
     weight_decay: 0.0
     # schedule
     schedule: 'step'
-    lr: 0.0002
+    lr: 0.0001
     lr_step: 15000
     lr_decay: 0.5
 

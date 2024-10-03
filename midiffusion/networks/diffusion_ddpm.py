@@ -300,12 +300,12 @@ class GaussianDiffusion(BaseDiffusion):
 
         return p_mean, p_variance, p_log_variance
 
-    def p_pred(self, denoise_fn, x_t, t, condition, condition_cross):
+    def p_pred(self, denoise_fn, x_t, t, condition, condition_cross, room_type_context=None):
         """
         mean and variance of the denoising step p(x_{t-1} | x_t)
         """
         # Compute prediceted mean
-        model_output = denoise_fn(x_t, t, condition, condition_cross)
+        model_output = denoise_fn(x_t, t, condition, condition_cross, room_type_context)
         p_mean, p_variance, p_log_variance = \
             self.p_pred_from_denoise_out(model_output, x_t, t)
         assert p_mean.shape == x_t.shape
@@ -326,13 +326,13 @@ class GaussianDiffusion(BaseDiffusion):
         )
 
     def p_sample(self, denoise_fn, x_t, t, condition, condition_cross, 
-                 clip_denoised=False):
+                 clip_denoised=False, room_type_context=None):
         """
         denoise step: p(x_{t-1} | x_t)
         """
         mean, _, log_variance = self.p_pred(
             denoise_fn, x_t=x_t, t=t, condition=condition, 
-            condition_cross=condition_cross
+            condition_cross=condition_cross, room_type_context=room_type_context
         )
 
         noise = torch.randn_like(mean)
@@ -344,7 +344,7 @@ class GaussianDiffusion(BaseDiffusion):
             return sample
 
     def p_sample_loop(self, denoise_fn, x_end, condition, condition_cross,
-                      sample_freq=None, clip_denoised=True):
+                      sample_freq=None, clip_denoised=True, room_type_context=None):
         """
         Generate samples through iterative denoising.
         """
@@ -358,7 +358,7 @@ class GaussianDiffusion(BaseDiffusion):
             t_ = torch.full((B,), t, dtype=torch.int64, device=self.device)
             x_t = self.p_sample(
                 denoise_fn=denoise_fn, x_t=x_t, t=t_, condition=condition, 
-                condition_cross=condition_cross, clip_denoised=clip_denoised
+                condition_cross=condition_cross, clip_denoised=clip_denoised, room_type_context=room_type_context
             )
 
             if sample_freq and t % sample_freq == 0:
@@ -563,12 +563,12 @@ class DiffusionPoint(nn.Module):
         
         self.model = denoise_net
     
-    def _denoise(self, data, t, condition, condition_cross):
+    def _denoise(self, data, t, condition, condition_cross, room_type_context=None):
         B, D, N = data.shape
         assert data.dtype == torch.float
         assert t.shape == torch.Size([B]) and t.dtype == torch.int64
 
-        out = self.model(data, t, condition, condition_cross)
+        out = self.model(data, t, condition, condition_cross, room_type_context)
         assert out.shape == torch.Size([B, D, N])
 
         return out
@@ -586,12 +586,13 @@ class DiffusionPoint(nn.Module):
         return losses, loss_dict
     
     def gen_samples(self, shape, device, condition=None, condition_cross=None,
-                    freq=None, clip_denoised=False):
+                    freq=None, clip_denoised=False, room_type_context=None):
         self.diffusion._move_tensors(device)
         x_end = torch.randn(size=shape, dtype=torch.float, device=device)
         
         return self.diffusion.p_sample_loop(
             self._denoise, x_end=x_end,
             condition=condition, condition_cross=condition_cross,
-            sample_freq=freq, clip_denoised=clip_denoised
+            sample_freq=freq, clip_denoised=clip_denoised,
+            room_type_context=room_type_context
         )

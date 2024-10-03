@@ -160,7 +160,7 @@ class MixedDiffusionPoint(nn.Module):
     def gen_samples(self, shape_geo, device, condition, 
                     x0_class_partial=None, class_mask=None,
                     x0_geometric_partial=None, geometry_mask=None,
-                    freq=None, clip_denoised=False):
+                    freq=None, clip_denoised=False, room_type_context=None):
         B, N, C = shape_geo
         self.diffusion_semantic._move_tensors(device)
         self.diffusion_geometric._move_tensors(device)
@@ -224,7 +224,7 @@ class MixedDiffusionPoint(nn.Module):
             
             x_t_class = log_onehot_to_index(log_x_t_class)
             denoise_out_class, denoise_out_geometric = \
-                self.model(x_t_class, x_t_geometric, t_, context=condition)
+                self.model(x_t_class, x_t_geometric, t_, context=condition, room_type_context=room_type_context)
             # semantic label probability distribution
             log_x_recon = self.diffusion_semantic.log_pred_from_denoise_out(denoise_out_class)
             if t == 0:

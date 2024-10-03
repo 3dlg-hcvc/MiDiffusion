@@ -180,7 +180,7 @@ class DiffusionSceneLayout_DDPM(Module):
         return loss, loss_dict
 
     def sample(self, room_feature=None, batch_size=1, input_boxes=None, 
-               feature_mask=None, clip_denoised=False, ret_traj=False, freq=40, 
+               feature_mask=None, clip_denoised=False, room_type_context=None, ret_traj=False, freq=40,
                device="cpu"):
         # condition to denoise_net
         condition = self.unpack_condition(batch_size, device, room_feature)
@@ -189,12 +189,12 @@ class DiffusionSceneLayout_DDPM(Module):
         data_shape = (batch_size, self.sample_num_points, self.point_dim)          
         return self.diffusion.gen_samples(
             data_shape, device=device, condition=condition,
-            clip_denoised=clip_denoised, freq=freq if ret_traj else None
+            clip_denoised=clip_denoised, room_type_context=room_type_context, freq=freq if ret_traj else None
         )
 
     @torch.no_grad()
     def generate_layout(self, room_feature=None, batch_size=1, input_boxes=None,
-                        feature_mask=None, clip_denoised=False, device="cpu"):
+                        feature_mask=None, clip_denoised=False, room_type_context=None, device="cpu"):
         """Generate a list of bbox_params dict, each corresponds to one layout 
         that can be processed by dataset's post_process() class function.
         The features in each dict is a tensor of [0, Ni, ?] dimension where 
@@ -204,9 +204,9 @@ class DiffusionSceneLayout_DDPM(Module):
         
         samples = self.sample(
             room_feature, batch_size, input_boxes=input_boxes, feature_mask=feature_mask,
-            clip_denoised=clip_denoised, device=device, ret_traj=False
+            clip_denoised=clip_denoised, room_type_context=room_type_context, device=device, ret_traj=False
         )
-        
+
         return self.delete_empty_from_network_samples(samples)
 
     @torch.no_grad()

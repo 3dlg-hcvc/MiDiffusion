@@ -69,10 +69,14 @@ class DiffusionSceneLayout_Mixed(DiffusionSceneLayout_DDPM):
 
     def sample(self, room_feature=None, batch_size=1, input_boxes=None, 
                feature_mask=None, clip_denoised=False, ret_traj=False, freq=40, 
-               device="cpu"):
+               room_type_context=None, device="cpu"):
         # condition to denoise_net
         condition = self.unpack_condition(batch_size, device, room_feature)
-        
+        if room_type_context is not None:
+            # convert room_type_context to tensor and make it the same size of batch_size
+            room_type_context = torch.tensor([room_type_context]*batch_size, device=device)
+
+
         # retrieve known features from input_boxes if available
         x0_class, x0_geometric, class_mask, geometry_mask = None, None, None, None
         if input_boxes is not None:
@@ -108,7 +112,7 @@ class DiffusionSceneLayout_Mixed(DiffusionSceneLayout_DDPM):
                 geometric_data_shape, device=device, condition=condition,
                 x0_class_partial=x0_class, class_mask=class_mask,
                 x0_geometric_partial=x0_geometric, geometry_mask=geometry_mask, 
-                freq=freq, clip_denoised=clip_denoised
+                freq=freq, clip_denoised=clip_denoised, room_type_context=room_type_context
             )
             samples_list = []
             for samples_class, samples_geometric in samples_traj:
@@ -123,7 +127,7 @@ class DiffusionSceneLayout_Mixed(DiffusionSceneLayout_DDPM):
                 geometric_data_shape, device=device, condition=condition,
                 x0_class_partial=x0_class, class_mask=class_mask,
                 x0_geometric_partial=x0_geometric, geometry_mask=geometry_mask, 
-                clip_denoised=clip_denoised
+                clip_denoised=clip_denoised, room_type_context=room_type_context
             )
             return torch.cat([
                 samples_geometric[:, :, :self.bbox_dim],

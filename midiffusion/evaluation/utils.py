@@ -11,7 +11,7 @@ from midiffusion.datasets.threed_front_encoding import Diffusion
 def generate_layouts(network:DiffusionSceneLayout_DDPM, encoded_dataset:Diffusion, 
                      config, num_syn_scenes, sampling_rule="random", 
                      experiment="synthesis", num_known_objects=0, 
-                     batch_size=16, device="cpu"):
+                     batch_size=16, device="cpu", room_type_context=None):
     """Generate speicifed number of object layouts and also return a list of scene 
     indices corresponding to the floor plan. Each layout is a 2D array where each 
     row contain the concatenated object attributes.
@@ -107,6 +107,7 @@ def generate_layouts(network:DiffusionSceneLayout_DDPM, encoded_dataset:Diffusio
             input_boxes=input_boxes,
             feature_mask=feature_mask,
             device=device,
+            room_type_context=room_type_context
         )
         for bbox_params_dict in bbox_params_list:
             boxes = encoded_dataset.post_process(bbox_params_dict)
