@@ -4,6 +4,7 @@ import os
 import sys
 import shutil
 import pickle
+import json
 
 import numpy as np
 import torch
@@ -15,6 +16,55 @@ from midiffusion.datasets.threed_front_encoding import get_dataset_raw_and_encod
 from midiffusion.networks import build_network
 from midiffusion.evaluation.utils import generate_layouts
 
+def load_custom_floorplan(custom_floorplan_dir):
+    # load custom floorplan in npz format
+    custom_floorplans = []
+    for file in os.listdir(custom_floorplan_dir):
+        if os.path.isdir(os.path.join(custom_floorplan_dir, file)):
+            custom_floorplans.append(np.load(os.path.join(custom_floorplan_dir, file, "boxes.npz")))
+    return custom_floorplans
+
+def save_formatted_results(sampled_indices, layout_list, classes, output_dir):
+    """Save results in the specified format.
+    
+    Args:
+        sampled_indices: List of floor plan IDs
+        layout_list: List of dictionaries containing object parameters
+        output_dir: Directory to save the formatted results
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    for idx, (floor_id, layout) in enumerate(zip(sampled_indices, layout_list)):
+        # Create result dictionary in desired format
+        result = {
+            "floor_plan_id": str(floor_id),
+            "object_list": []
+        }
+        
+        # Extract object information from layout
+        n_objects = len(layout['class_labels'])
+        for i in range(n_objects):
+            class_label = classes[np.argmax(layout['class_labels'][i])]
+            obj = {
+                "theta": float(layout['angles'][i]),
+                "translation": [
+                    float(layout['translations'][i][0]),
+                    float(layout['translations'][i][1]),
+                    float(layout['translations'][i][2])
+                ],
+                "class_label": class_label,
+                "size": [
+                    float(layout['sizes'][i][0]),
+                    float(layout['sizes'][i][1]),
+                    float(layout['sizes'][i][2])
+                ]
+            }
+            result["object_list"].append(obj)
+            
+        # Save to JSON file
+        output_file = os.path.join(output_dir, f"result_{idx}.json")
+        with open(output_file, 'w') as f:
+            json.dump(result, f, indent=4)
 
 def main(argv):
     parser = argparse.ArgumentParser(
@@ -83,6 +133,16 @@ def main(argv):
         default=0,
         help="GPU ID"
     )
+    parser.add_argument(
+        "--custom_floorplan",
+        action="store_true",
+        help="Use custom floorplan"
+    )
+    parser.add_argument(
+        "--custom_floorplan_dir",
+        default="/localhome/xsa55/Xiaohao/SemDiffLayout/datasets/output/unified_3dfront_bbox_floor_mask/selected_floor_plans/",
+        help="Path to the custom floorplan directory"
+    )
 
     args = parser.parse_args(argv)
 
@@ -129,8 +189,8 @@ def main(argv):
         shutil.copyfile(args.config_file, path_to_config)
 
     # todo: test with unified config; need to delete later
-    config["data"]["room_type_context"] = 0
-    room_type_context = config["data"]["room_type_context"]
+    # config["data"]["room_type_context"] = 1
+    room_type_context = 2
     # if "unified" in config["data"]["dataset_directory"]:
     #     room_type_context = config["data"]["room_type_context"]
     #     if room_type_context == 0:
@@ -172,23 +232,41 @@ def main(argv):
     )
     network.eval()
 
+    # load custom floorplan
+    if args.custom_floorplan:
+        if room_type_context == 0:
+            custom_floorplans = load_custom_floorplan(args.custom_floorplan_dir+"/bed_fp")
+        elif room_type_context == 1:
+            custom_floorplans = load_custom_floorplan(args.custom_floorplan_dir+"/living_fp")
+        elif room_type_context == 2:
+            custom_floorplans = load_custom_floorplan(args.custom_floorplan_dir+"/dining_fp")
+    else:
+        custom_floorplans = None
+    # breakpoint()
     # Generate final results
     sampled_indices, layout_list = generate_layouts(
         network, encoded_dataset, config, args.n_syn_scenes, "random",
         experiment=args.experiment, num_known_objects=args.n_known_objects, 
-        batch_size=args.batch_size, device=device, room_type_context=room_type_context
+        batch_size=args.batch_size, device=device, room_type_context=room_type_context,
+        custom_floorplan=custom_floorplans
     )
     
+    # Save results in the desired format
+    formatted_output_dir = os.path.join(result_dir, "formatted_results")
+    classes = encoded_dataset.class_labels
+    save_formatted_results(sampled_indices, layout_list, classes, formatted_output_dir)
+    print(f"Saved formatted results to: {formatted_output_dir}")
+    
+    # Original result saving
     threed_front_results = ThreedFrontResults(
         raw_train_dataset, raw_dataset, config, sampled_indices, layout_list
     )
-    
+    # breakpoint()
     pickle.dump(threed_front_results, open(path_to_results, "wb"))
     print("Saved result to:", path_to_results)
     
-    kl_divergence = threed_front_results.kl_divergence()
-    print("object category kl divergence:", kl_divergence)
-           
+    # kl_divergence = threed_front_results.kl_divergence()
+    # print("object category kl divergence:", kl_divergence)
 
 if __name__ == "__main__":
     main(sys.argv[1:])

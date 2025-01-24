@@ -58,7 +58,6 @@ class Diffusion(DatasetDecoratorBase):
                 ]).astype(np.float32)
 
         sample_params.update(sample_params_target)
-
         return sample_params
 
     @property
@@ -99,6 +98,7 @@ def get_dataset_raw_and_encoded(
         config.get("box_ordering", None),
         max_length
     )
+    # breakpoint()
 
     return dataset, encoding
 

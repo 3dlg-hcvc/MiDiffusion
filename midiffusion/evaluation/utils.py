@@ -8,27 +8,40 @@ from midiffusion.networks.diffusion_scene_layout_mixed import DiffusionSceneLayo
 from midiffusion.datasets.threed_front_encoding import Diffusion
 
 
+def scale(x, minimum, maximum):
+    """Scale the input to [-1, 1] range"""
+    X = x.astype(np.float32)
+    X = np.clip(X, minimum, maximum)
+    X = ((X - minimum) / (maximum - minimum))
+    X = 2 * X - 1
+    return X
+
 def generate_layouts(network:DiffusionSceneLayout_DDPM, encoded_dataset:Diffusion, 
                      config, num_syn_scenes, sampling_rule="random", 
                      experiment="synthesis", num_known_objects=0, 
-                     batch_size=16, device="cpu", room_type_context=None):
-    """Generate speicifed number of object layouts and also return a list of scene 
-    indices corresponding to the floor plan. Each layout is a 2D array where each 
-    row contain the concatenated object attributes.
-    (Note: this code assumes "end" is the last object label, and, if used, 
-    "start" is the second to last label.)"""
+                     batch_size=16, device="cpu", room_type_context=None,
+                     custom_floorplan=None):
+    """Generate specified number of object layouts using either dataset floorplans
+    or a custom floorplan set."""
     
-    # Sample floor layout
-    if sampling_rule == "random":
-        sampled_indices = np.random.choice(len(encoded_dataset), num_syn_scenes).tolist()
-    elif sampling_rule == "uniform":
-        sampled_indices = np.arange(len(encoded_dataset)).tolist() * \
-            (num_syn_scenes // len(encoded_dataset))
-        sampled_indices += \
-            np.random.choice(len(encoded_dataset), 
-                             num_syn_scenes - len(sampled_indices)).tolist()
+    # Sample floor layout or use custom floorplan
+    if custom_floorplan is not None:
+        # Use all provided floorplans
+        room_feature = custom_floorplan
+        # Use sequential indices for all floorplans
+        sampled_indices = np.arange(num_syn_scenes).tolist()
     else:
-        raise NotImplemented
+        # Original sampling logic
+        if sampling_rule == "random":
+            sampled_indices = np.random.choice(len(encoded_dataset), num_syn_scenes).tolist()
+        elif sampling_rule == "uniform":
+            sampled_indices = np.arange(len(encoded_dataset)).tolist() * \
+                (num_syn_scenes // len(encoded_dataset))
+            sampled_indices += \
+                np.random.choice(len(encoded_dataset), 
+                                 num_syn_scenes - len(sampled_indices)).tolist()
+        else:
+            raise NotImplemented
     
     # network params
     with_room_mask = config["network"].get("room_mask_condition", True)
@@ -83,17 +96,33 @@ def generate_layouts(network:DiffusionSceneLayout_DDPM, encoded_dataset:Diffusio
     for i in tqdm(range(0, num_syn_scenes, batch_size)):
         scene_indices = sampled_indices[i: min(i + batch_size, num_syn_scenes)]
         
-        room_feature = None
-        if with_room_mask:
-            if config["feature_extractor"]["name"] == "resnet18":
-                room_feature = torch.from_numpy(np.stack([
-                    encoded_dataset[ind]["room_layout"] for ind in scene_indices
-                ], axis=0)).to(device)
-            elif config["feature_extractor"]["name"] == "pointnet_simple":
-                room_feature = torch.from_numpy(np.stack([
-                    encoded_dataset[ind]["fpbpn"] for ind in scene_indices
-                ], axis=0)).to(device)
-                
+        if custom_floorplan is not None:
+            # Get floor plan boundary points and normals
+            floor_points = np.stack([
+                custom_floorplan[ind]["floor_plan_boundary_points_normals"] 
+                for ind in scene_indices
+            ], axis=0)
+
+            room_side = 6
+            max_bounds = np.array([room_side,room_side,1,1])
+            min_bounds = np.array([-room_side,-room_side,-1,-1])
+            # scale points
+            floor_points_scaled = scale(floor_points, min_bounds, max_bounds).astype(np.float32)  # Adjust min/max based on your training data
+            # Convert to tensor
+            current_room_feature = torch.from_numpy(floor_points_scaled).to(device)
+            # breakpoint()
+        else:
+            # Original room feature loading logic
+            if with_room_mask:
+                if config["feature_extractor"]["name"] == "resnet18":
+                    current_room_feature = torch.from_numpy(np.stack([
+                        encoded_dataset[ind]["room_layout"] for ind in scene_indices
+                    ], axis=0)).to(device)
+                elif config["feature_extractor"]["name"] == "pointnet_simple":
+                    current_room_feature = torch.from_numpy(np.stack([
+                        encoded_dataset[ind]["fpbpn"] for ind in scene_indices
+                    ], axis=0)).to(device)
+        
         if experiment == "synthesis":
             input_boxes = None
         else:
@@ -102,7 +131,7 @@ def generate_layouts(network:DiffusionSceneLayout_DDPM, encoded_dataset:Diffusio
             input_boxes = network.unpack_data(sample_params).to(device)
 
         bbox_params_list = network.generate_layout(
-            room_feature=room_feature,
+            room_feature=current_room_feature,
             batch_size=len(scene_indices),
             input_boxes=input_boxes,
             feature_mask=feature_mask,
