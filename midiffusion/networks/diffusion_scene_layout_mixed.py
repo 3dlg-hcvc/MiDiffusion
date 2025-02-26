@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 from .diffusion_mixed import MixedDiffusionPoint
 from .denoising_net.mixed_transformer import MixedDenoiseTransformer
@@ -37,16 +38,33 @@ class DiffusionSceneLayout_Mixed(DiffusionSceneLayout_DDPM):
     def get_loss(self, sample_params):
         # unpack sample_params
         room_layout_target = self.unpack_data(sample_params)
+        device = room_layout_target.device  # Get the target device
+        dtype = self.feature_extractor.layers[0].weight.dtype
         
         # unpack condition
         room_feature = None
+        arch_features = {}
+        
         if self.room_mask_condition:
             if isinstance(self.feature_extractor, ResNet18):
-                room_feature = sample_params["room_layout"]
+                room_feature = sample_params["room_layout"].to(device=device, dtype=dtype)
             elif isinstance(self.feature_extractor, PointNet_Point):
-                room_feature = sample_params["fpbpn"]
+                room_feature = sample_params["fpbpn"].to(device=device, dtype=dtype)
+
+        if self.arch_condition:
+            # Process windows if present
+            if "wbpn" in sample_params and sample_params["wbpn"] is not None:
+                # Store window features as a list
+                arch_features["wbpn"] = sample_params["wbpn"]
+            
+            # Process doors if present
+            if "dbpn" in sample_params and sample_params["dbpn"] is not None:
+                # Store door features as a list
+                arch_features["dbpn"] = sample_params["dbpn"]
+        
         condition = self.unpack_condition(
-            room_layout_target.shape[0], room_layout_target.device, room_feature
+            room_layout_target.shape[0], room_layout_target.device, 
+            room_feature, arch_features
         )
         semantic_target = \
             room_layout_target[:, :, self.bbox_dim:self.bbox_dim+self.class_dim]\
@@ -67,15 +85,14 @@ class DiffusionSceneLayout_Mixed(DiffusionSceneLayout_DDPM):
         )
         return loss, loss_dict
 
-    def sample(self, room_feature=None, batch_size=1, input_boxes=None, 
+    def sample(self, room_feature=None, arch_features=None, batch_size=1, input_boxes=None, 
                feature_mask=None, clip_denoised=False, ret_traj=False, freq=40, 
                room_type_context=None, device="cpu"):
         # condition to denoise_net
-        condition = self.unpack_condition(batch_size, device, room_feature)
+        condition = self.unpack_condition(batch_size, device, room_feature, arch_features)
         if room_type_context is not None:
             # convert room_type_context to tensor and make it the same size of batch_size
             room_type_context = torch.tensor([room_type_context]*batch_size, device=device)
-
 
         # retrieve known features from input_boxes if available
         x0_class, x0_geometric, class_mask, geometry_mask = None, None, None, None

@@ -122,6 +122,8 @@ def generate_layouts(network:DiffusionSceneLayout_DDPM, encoded_dataset:Diffusio
                     current_room_feature = torch.from_numpy(np.stack([
                         encoded_dataset[ind]["fpbpn"] for ind in scene_indices
                     ], axis=0)).to(device)
+            else:
+                current_room_feature = None
         
         if experiment == "synthesis":
             input_boxes = None
@@ -130,6 +132,7 @@ def generate_layouts(network:DiffusionSceneLayout_DDPM, encoded_dataset:Diffusio
             sample_params = dataloader.default_collate(samples)
             input_boxes = network.unpack_data(sample_params).to(device)
 
+        # breakpoint()
         bbox_params_list = network.generate_layout(
             room_feature=current_room_feature,
             batch_size=len(scene_indices),

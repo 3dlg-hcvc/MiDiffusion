@@ -8,6 +8,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import Module
+import numpy as np
 
 from .diffusion_ddpm import DiffusionPoint
 from .denoising_net.unet1D import Unet1D
@@ -47,16 +48,33 @@ class DiffusionSceneLayout_DDPM(Module):
         self.context_dim = 0
 
         # room_mask_condition: if yes, define the feature extractor for the room mask
+        # Initialize shared feature extractor for both conditions
         self.room_mask_condition = config.get("room_mask_condition", True)
+        self.arch_condition = config.get("arch_condition", False)
+        
+        if self.room_mask_condition or self.arch_condition:
+            self.feature_extractor = feature_extractor
+            print('use shared feature extractor for conditions')
+
+        # room_mask_condition setup
         if self.room_mask_condition:
             self.room_latent_dim = config["room_latent_dim"]
-            self.feature_extractor = feature_extractor
             self.fc_room_f = nn.Linear(
                 self.feature_extractor.feature_size, self.room_latent_dim
             ) if self.feature_extractor.feature_size != self.room_latent_dim \
                 else nn.Identity()
             print('use room mask as condition')
             self.context_dim += self.room_latent_dim
+
+        # arch_condition setup with shared feature extractor
+        if self.arch_condition:
+            self.arch_latent_dim = config["arch_latent_dim"]
+            self.fc_arch_f = nn.Linear(
+                self.feature_extractor.feature_size, self.arch_latent_dim
+            ) if self.feature_extractor.feature_size != self.arch_latent_dim \
+                else nn.Identity()
+            print('use arch as condition')
+            self.context_dim += self.arch_latent_dim
         
         # define positional embeddings
         self.position_condition = config.get("position_condition", False)
@@ -133,15 +151,102 @@ class DiffusionSceneLayout_DDPM(Module):
         
         return room_layout_target
     
-    def unpack_condition(self, batch_size, device, room_feature=None):        
+    def unpack_condition(self, batch_size, device, room_feature=None, arch_features=None):        
         # condition to denoise_net
         condition = None
+        dtype = self.feature_extractor.layers[0].weight.dtype
 
         # get the latent feature of room_mask
-        if self.room_mask_condition:
+        if self.room_mask_condition and room_feature is not None:
+            # Convert room_feature to the same dtype as the model
+            room_feature = room_feature.to(dtype=dtype, device=device)
             room_layout_f = self.fc_room_f(self.feature_extractor(room_feature))
             condition = room_layout_f[:, None, :].repeat(1, self.sample_num_points, 1)
-        
+            
+        # get the latent feature of arch elements using shared feature extractor
+        if self.arch_condition and arch_features is not None:
+            # Process window and door features separately
+            arch_condition = None
+            
+            # Process windows if present
+            if isinstance(arch_features, dict) and "wbpn" in arch_features and arch_features["wbpn"] is not None:
+                window_feat = arch_features["wbpn"]
+                
+                # Process each batch item separately
+                batch_window_features = []
+                
+                # Process each batch item
+                for b in range(len(window_feat)):
+                    # Get all windows for this batch item
+                    windows_for_batch = window_feat[b]  # This is a list of numpy arrays
+                    
+                    # Process each window separately
+                    window_layouts = []
+                    for single_window in windows_for_batch:
+                        # Convert numpy array to torch tensor
+                        single_window = torch.from_numpy(single_window.astype(np.float32))
+                        single_window = single_window.unsqueeze(0)  # Add batch dimension
+                        
+                        # Move to correct device and dtype
+                        single_window = single_window.to(dtype=dtype, device=device)
+                        window_layout_f = self.fc_arch_f(self.feature_extractor(single_window))
+                        window_layouts.append(window_layout_f)
+                    
+                    # Average all window features for this batch item
+                    if window_layouts:
+                        avg_window_layout = torch.mean(torch.stack(window_layouts), dim=0)
+                        batch_window_features.append(avg_window_layout)
+                
+                # Stack all batch window features
+                if batch_window_features:
+                    window_features_combined = torch.stack(batch_window_features)
+                    arch_condition = window_features_combined
+            
+            # Process doors if present
+            if isinstance(arch_features, dict) and "dbpn" in arch_features and arch_features["dbpn"] is not None:
+                door_feat = arch_features["dbpn"]
+                
+                # Process each batch item separately
+                batch_door_features = []
+                
+                # Process each batch item
+                for b in range(len(door_feat)):
+                    # Get all doors for this batch item
+                    doors_for_batch = door_feat[b]  # This is a list of numpy arrays
+                    
+                    # Process each door separately
+                    door_layouts = []
+                    for single_door in doors_for_batch:
+                        # Convert numpy array to torch tensor
+                        single_door = torch.from_numpy(single_door.astype(np.float32))
+                        single_door = single_door.unsqueeze(0)  # Add batch dimension
+                        
+                        # Move to correct device and dtype
+                        single_door = single_door.to(dtype=dtype, device=device)
+                        door_layout_f = self.fc_arch_f(self.feature_extractor(single_door))
+                        door_layouts.append(door_layout_f)
+                    
+                    # Average all door features for this batch item
+                    if door_layouts:
+                        avg_door_layout = torch.mean(torch.stack(door_layouts), dim=0)
+                        batch_door_features.append(avg_door_layout)
+                
+                # Stack all batch door features
+                if batch_door_features:
+                    door_features_combined = torch.stack(batch_door_features)
+                    
+                    # Combine with window features if they exist
+                    if arch_condition is not None:
+                        # Average window and door features
+                        arch_condition = (arch_condition + door_features_combined) / 2.0
+                    else:
+                        arch_condition = door_features_combined
+            
+            # Add arch condition to the overall condition
+            if arch_condition is not None:
+                arch_condition = arch_condition.repeat(1, self.sample_num_points, 1)
+                condition = torch.cat([condition, arch_condition], dim=-1) if condition is not None else arch_condition
+        breakpoint()
         # process instance position condition f
         if self.position_condition:
             if self.learnable_embedding:
@@ -164,13 +269,29 @@ class DiffusionSceneLayout_DDPM(Module):
         
         # unpack condition
         room_feature = None
+        arch_features = {}
+        dtype = self.feature_extractor.layers[0].weight.dtype
+        
         if self.room_mask_condition:
             if isinstance(self.feature_extractor, ResNet18):
-                room_feature = sample_params["room_layout"]
+                room_feature = sample_params["room_layout"].to(dtype=dtype)
             elif isinstance(self.feature_extractor, PointNet_Point):
-                room_feature = sample_params["fpbpn"]
+                room_feature = sample_params["fpbpn"].to(dtype=dtype)
+    
+        if self.arch_condition:
+            # Process windows if present
+            if "wbpn" in sample_params and sample_params["wbpn"] is not None:
+                # Store window features as a list
+                arch_features["wbpn"] = sample_params["wbpn"]
+            
+            # Process doors if present
+            if "dbpn" in sample_params and sample_params["dbpn"] is not None:
+                # Store door features as a list
+                arch_features["dbpn"] = sample_params["dbpn"]
+            
         condition = self.unpack_condition(
-            room_layout_target.shape[0], room_layout_target.device, room_feature
+            room_layout_target.shape[0], room_layout_target.device, 
+            room_feature, arch_features
         )
         
         # denoise loss function
@@ -179,11 +300,11 @@ class DiffusionSceneLayout_DDPM(Module):
         )
         return loss, loss_dict
 
-    def sample(self, room_feature=None, batch_size=1, input_boxes=None, 
+    def sample(self, room_feature=None, arch_features=None, batch_size=1, input_boxes=None, 
                feature_mask=None, clip_denoised=False, room_type_context=None, ret_traj=False, freq=40,
                device="cpu"):
         # condition to denoise_net
-        condition = self.unpack_condition(batch_size, device, room_feature)
+        condition = self.unpack_condition(batch_size, device, room_feature, arch_features)
 
         # reverse sampling
         data_shape = (batch_size, self.sample_num_points, self.point_dim)          
@@ -193,24 +314,24 @@ class DiffusionSceneLayout_DDPM(Module):
         )
 
     @torch.no_grad()
-    def generate_layout(self, room_feature=None, batch_size=1, input_boxes=None,
+    def generate_layout(self, room_feature=None, arch_features=None, batch_size=1, input_boxes=None,
                         feature_mask=None, clip_denoised=False, room_type_context=None, device="cpu"):
         """Generate a list of bbox_params dict, each corresponds to one layout 
         that can be processed by dataset's post_process() class function.
         The features in each dict is a tensor of [0, Ni, ?] dimension where 
         Ni is the number of objects predicted."""
-        if self.room_mask_condition:
+        if self.room_mask_condition and room_feature is not None:
             assert room_feature.size(0) == batch_size
         
         samples = self.sample(
-            room_feature, batch_size, input_boxes=input_boxes, feature_mask=feature_mask,
+            room_feature, arch_features, batch_size, input_boxes=input_boxes, feature_mask=feature_mask,
             clip_denoised=clip_denoised, room_type_context=room_type_context, device=device, ret_traj=False
         )
 
         return self.delete_empty_from_network_samples(samples)
 
     @torch.no_grad()
-    def generate_layout_progressive(self, room_feature=None, batch_size=1, 
+    def generate_layout_progressive(self, room_feature=None, arch_features=None, batch_size=1, 
                                     input_boxes=None, feature_mask=None, 
                                     clip_denoised=False, device="cpu", 
                                     save_freq=100):
@@ -222,7 +343,7 @@ class DiffusionSceneLayout_DDPM(Module):
         Ni is the number of objects predicted."""
         # generate results at each time step
         samples_traj = self.sample(
-            room_feature, batch_size, input_boxes=input_boxes, feature_mask=feature_mask,
+            room_feature, arch_features, batch_size, input_boxes=input_boxes, feature_mask=feature_mask,
             clip_denoised=clip_denoised, device=device, ret_traj=True, freq=save_freq,  
         )
         results_by_time = []
@@ -302,3 +423,18 @@ class DiffusionSceneLayout_DDPM(Module):
             boxes_list.append(boxes)
 
         return boxes_list
+
+    def __getitem__(self, idx):
+        sample_params = self._dataset[idx]
+
+        # Add the number of bounding boxes in the scene
+        sample_params["length"] = sample_params["class_labels"].shape[0]
+        
+        # Ensure at least one architectural feature exists in all samples
+        if not any(key.startswith("wbpn") for key in sample_params.keys()):
+            sample_params["wbpn"] = torch.zeros((1, 256, 4), dtype=torch.float32)  # Will be moved to correct device later
+        
+        if not any(key.startswith("dbpn") for key in sample_params.keys()):
+            sample_params["dbpn"] = torch.zeros((1, 256, 4), dtype=torch.float32)  # Will be moved to correct device later
+        
+        return sample_params

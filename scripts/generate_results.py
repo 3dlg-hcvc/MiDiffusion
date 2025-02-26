@@ -190,7 +190,7 @@ def main(argv):
 
     # todo: test with unified config; need to delete later
     # config["data"]["room_type_context"] = 1
-    room_type_context = 2
+    room_type_context = 0
     # if "unified" in config["data"]["dataset_directory"]:
     #     room_type_context = config["data"]["room_type_context"]
     #     if room_type_context == 0:

@@ -26,11 +26,17 @@ class Diffusion(DatasetDecoratorBase):
         # Add the number of bounding boxes in the scene
         sample_params["length"] = sample_params["class_labels"].shape[0]
         
+        # Ensure architectural features exist in all samples
+        if "wbpn" not in sample_params:
+            sample_params["wbpn"] = np.zeros((1, 256, 4), dtype=np.float32)
+        if "dbpn" not in sample_params:
+            sample_params["dbpn"] = np.zeros((1, 256, 4), dtype=np.float32)
+
         sample_params_target = {}
         # Compute the target from the input
         for k, v in sample_params.items():
             if k in [
-                "room_layout", "length", "fpbpn", "room_type"
+                "room_layout", "length", "fpbpn", "room_type", "wbpn", "dbpn"
             ]:
                 pass
 
@@ -70,9 +76,22 @@ class Diffusion(DatasetDecoratorBase):
         Args:
             samples: samples
         '''
-    
         samples = list(filter(lambda x: x is not None, samples))
-        return dataloader.default_collate(samples)
+        
+        # Handle architectural features separately
+        arch_features = {}
+        if 'wbpn' in samples[0]:
+            arch_features['wbpn'] = [s.pop('wbpn') for s in samples]
+        if 'dbpn' in samples[0]:
+            arch_features['dbpn'] = [s.pop('dbpn') for s in samples]
+        
+        # Collate everything else normally
+        batch = dataloader.default_collate(samples)
+        
+        # Add back architectural features as lists
+        batch.update(arch_features)
+        
+        return batch
 
 
 def get_dataset_raw_and_encoded(
