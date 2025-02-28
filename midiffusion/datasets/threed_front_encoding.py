@@ -79,12 +79,29 @@ class Diffusion(DatasetDecoratorBase):
         samples = list(filter(lambda x: x is not None, samples))
         
         # Handle architectural features separately
-        arch_features = {}
-        if 'wbpn' in samples[0]:
-            arch_features['wbpn'] = [s.pop('wbpn') for s in samples]
-        if 'dbpn' in samples[0]:
-            arch_features['dbpn'] = [s.pop('dbpn') for s in samples]
+        arch_features = {
+            'wbpn': [],
+            'wbpn_idx': [],
+            'dbpn': [],
+            'dbpn_idx': []
+        }
         
+        for idx, s in enumerate(samples):
+            wbpn = s.pop('wbpn')
+            dbpn = s.pop('dbpn')
+            # append to arch_features
+            for bpn in wbpn:
+                arch_features['wbpn'].append(bpn)
+                arch_features['wbpn_idx'].append(idx)
+            for bpn in dbpn:
+                arch_features['dbpn'].append(bpn)
+                arch_features['dbpn_idx'].append(idx)
+        
+        # Stack all window features into a single array of shape (N, 256, 4)
+        arch_features['wbpn'] = np.stack(arch_features['wbpn'], axis=0).astype(np.float32)
+        arch_features['wbpn_idx'] = np.array(arch_features['wbpn_idx'], dtype=np.int64)
+        arch_features['dbpn'] = np.stack(arch_features['dbpn'], axis=0).astype(np.float32)
+        arch_features['dbpn_idx'] = np.array(arch_features['dbpn_idx'], dtype=np.int64)
         # Collate everything else normally
         batch = dataloader.default_collate(samples)
         

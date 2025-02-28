@@ -52,16 +52,17 @@ class DiffusionSceneLayout_Mixed(DiffusionSceneLayout_DDPM):
                 room_feature = sample_params["fpbpn"].to(device=device, dtype=dtype)
 
         if self.arch_condition:
-            # Process windows if present
-            if "wbpn" in sample_params and sample_params["wbpn"] is not None:
-                # Store window features as a list
-                arch_features["wbpn"] = sample_params["wbpn"]
+            window_features = sample_params["wbpn"].to(device=device, dtype=dtype)
+            door_features = sample_params["dbpn"].to(device=device, dtype=dtype)
+            window_idx = sample_params["wbpn_idx"].to(device=device)
+            door_idx = sample_params["dbpn_idx"].to(device=device)
             
-            # Process doors if present
-            if "dbpn" in sample_params and sample_params["dbpn"] is not None:
-                # Store door features as a list
-                arch_features["dbpn"] = sample_params["dbpn"]
-        
+            arch_features["wbpn"] = window_features
+            arch_features["dbpn"] = door_features
+            
+            arch_features["wbpn_idx"] = window_idx
+            arch_features["dbpn_idx"] = door_idx
+            
         condition = self.unpack_condition(
             room_layout_target.shape[0], room_layout_target.device, 
             room_feature, arch_features

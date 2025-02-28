@@ -9,6 +9,8 @@ import torch
 import torch.nn as nn
 from torch.nn import Module
 import numpy as np
+from torch_scatter import segment_coo
+
 
 from .diffusion_ddpm import DiffusionPoint
 from .denoising_net.unet1D import Unet1D
@@ -74,7 +76,7 @@ class DiffusionSceneLayout_DDPM(Module):
             ) if self.feature_extractor.feature_size != self.arch_latent_dim \
                 else nn.Identity()
             print('use arch as condition')
-            self.context_dim += self.arch_latent_dim
+            self.context_dim += self.arch_latent_dim * 2
         
         # define positional embeddings
         self.position_condition = config.get("position_condition", False)
@@ -163,90 +165,25 @@ class DiffusionSceneLayout_DDPM(Module):
             room_layout_f = self.fc_room_f(self.feature_extractor(room_feature))
             condition = room_layout_f[:, None, :].repeat(1, self.sample_num_points, 1)
             
-        # get the latent feature of arch elements using shared feature extractor
+        # get the latent feature of arch_features
         if self.arch_condition and arch_features is not None:
-            # Process window and door features separately
-            arch_condition = None
+            # get the latent feature of window features
+            window_features = arch_features["wbpn"]
+            window_features_f = self.fc_arch_f(self.feature_extractor(window_features))
+            window_idx = arch_features["wbpn_idx"]
+            window_features_f = segment_coo(window_features_f, window_idx)
+            window_features_f = window_features_f[:, None, :].repeat(1, self.sample_num_points, 1)
             
-            # Process windows if present
-            if isinstance(arch_features, dict) and "wbpn" in arch_features and arch_features["wbpn"] is not None:
-                window_feat = arch_features["wbpn"]
-                
-                # Process each batch item separately
-                batch_window_features = []
-                
-                # Process each batch item
-                for b in range(len(window_feat)):
-                    # Get all windows for this batch item
-                    windows_for_batch = window_feat[b]  # This is a list of numpy arrays
-                    
-                    # Process each window separately
-                    window_layouts = []
-                    for single_window in windows_for_batch:
-                        # Convert numpy array to torch tensor
-                        single_window = torch.from_numpy(single_window.astype(np.float32))
-                        single_window = single_window.unsqueeze(0)  # Add batch dimension
-                        
-                        # Move to correct device and dtype
-                        single_window = single_window.to(dtype=dtype, device=device)
-                        window_layout_f = self.fc_arch_f(self.feature_extractor(single_window))
-                        window_layouts.append(window_layout_f)
-                    
-                    # Average all window features for this batch item
-                    if window_layouts:
-                        avg_window_layout = torch.mean(torch.stack(window_layouts), dim=0)
-                        batch_window_features.append(avg_window_layout)
-                
-                # Stack all batch window features
-                if batch_window_features:
-                    window_features_combined = torch.stack(batch_window_features)
-                    arch_condition = window_features_combined
+            # get the latent feature of door features
+            door_features = arch_features["dbpn"]
+            door_features_f = self.fc_arch_f(self.feature_extractor(door_features))
+            door_idx = arch_features["dbpn_idx"]
+            door_features_f = segment_coo(door_features_f, door_idx)    
+            door_features_f = door_features_f[:, None, :].repeat(1, self.sample_num_points, 1)
             
-            # Process doors if present
-            if isinstance(arch_features, dict) and "dbpn" in arch_features and arch_features["dbpn"] is not None:
-                door_feat = arch_features["dbpn"]
-                
-                # Process each batch item separately
-                batch_door_features = []
-                
-                # Process each batch item
-                for b in range(len(door_feat)):
-                    # Get all doors for this batch item
-                    doors_for_batch = door_feat[b]  # This is a list of numpy arrays
-                    
-                    # Process each door separately
-                    door_layouts = []
-                    for single_door in doors_for_batch:
-                        # Convert numpy array to torch tensor
-                        single_door = torch.from_numpy(single_door.astype(np.float32))
-                        single_door = single_door.unsqueeze(0)  # Add batch dimension
-                        
-                        # Move to correct device and dtype
-                        single_door = single_door.to(dtype=dtype, device=device)
-                        door_layout_f = self.fc_arch_f(self.feature_extractor(single_door))
-                        door_layouts.append(door_layout_f)
-                    
-                    # Average all door features for this batch item
-                    if door_layouts:
-                        avg_door_layout = torch.mean(torch.stack(door_layouts), dim=0)
-                        batch_door_features.append(avg_door_layout)
-                
-                # Stack all batch door features
-                if batch_door_features:
-                    door_features_combined = torch.stack(batch_door_features)
-                    
-                    # Combine with window features if they exist
-                    if arch_condition is not None:
-                        # Average window and door features
-                        arch_condition = (arch_condition + door_features_combined) / 2.0
-                    else:
-                        arch_condition = door_features_combined
-            
-            # Add arch condition to the overall condition
-            if arch_condition is not None:
-                arch_condition = arch_condition.repeat(1, self.sample_num_points, 1)
-                condition = torch.cat([condition, arch_condition], dim=-1) if condition is not None else arch_condition
-        breakpoint()
+            arch_condition = torch.cat([window_features_f, door_features_f], dim=-1).contiguous()
+            condition = torch.cat([condition, arch_condition], dim=-1).contiguous()
+        
         # process instance position condition f
         if self.position_condition:
             if self.learnable_embedding:

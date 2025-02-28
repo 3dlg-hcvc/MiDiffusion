@@ -230,7 +230,7 @@ def main(argv):
             # Move everything to device
             for k, v in sample.items():
                 if not isinstance(v, list):
-                    sample[k] = v.to(device)
+                    sample[k] = torch.tensor(v).to(device)
             batch_loss = train_on_batch(network, optimizer, sample, config)
             StatsLogger.instance().print_progress(i, b+1, batch_loss)
 
