@@ -1,7 +1,7 @@
 data:
     dataset_type: "cached_threedfront"
     encoding_type: "cached_diffusion_cosin_angle_wocm"
-    dataset_directory: "unified_arch"
+    dataset_directory: "unifiedroom_arch"
     annotation_file: "unified_threed_front_splits.csv"
     augmentations: ["fixed_rotations"]
     train_stats: "dataset_stats.txt"
