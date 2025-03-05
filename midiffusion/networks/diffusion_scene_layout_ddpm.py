@@ -156,7 +156,8 @@ class DiffusionSceneLayout_DDPM(Module):
     def unpack_condition(self, batch_size, device, room_feature=None, arch_features=None):        
         # condition to denoise_net
         condition = None
-        dtype = self.feature_extractor.layers[0].weight.dtype
+        if self.room_mask_condition:
+            dtype = self.feature_extractor.layers[0].weight.dtype
 
         # get the latent feature of room_mask
         if self.room_mask_condition and room_feature is not None:

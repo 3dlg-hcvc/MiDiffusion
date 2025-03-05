@@ -28,9 +28,9 @@ class Diffusion(DatasetDecoratorBase):
         
         # Ensure architectural features exist in all samples
         if "wbpn" not in sample_params:
-            sample_params["wbpn"] = np.zeros((1, 256, 4), dtype=np.float32)
+            sample_params["wbpn"] = np.zeros((256, 4), dtype=np.float32)
         if "dbpn" not in sample_params:
-            sample_params["dbpn"] = np.zeros((1, 256, 4), dtype=np.float32)
+            sample_params["dbpn"] = np.zeros((256, 4), dtype=np.float32)
 
         sample_params_target = {}
         # Compute the target from the input
@@ -89,14 +89,22 @@ class Diffusion(DatasetDecoratorBase):
         for idx, s in enumerate(samples):
             wbpn = s.pop('wbpn')
             dbpn = s.pop('dbpn')
-            # append to arch_features
-            for bpn in wbpn:
-                arch_features['wbpn'].append(bpn)
+            
+            # Handle both single and multiple window/door cases
+            if wbpn.ndim == 2:  # Single window case (256,4)
+                arch_features['wbpn'].append(wbpn)
                 arch_features['wbpn_idx'].append(idx)
-            for bpn in dbpn:
-                arch_features['dbpn'].append(bpn)
+            elif wbpn.ndim == 3:  # Multiple windows case (x,256,4)
+                arch_features['wbpn'].extend([w for w in wbpn])
+                arch_features['wbpn_idx'].extend([idx] * len(wbpn))
+            
+            if dbpn.ndim == 2:  # Single door case (256,4)
+                arch_features['dbpn'].append(dbpn)
                 arch_features['dbpn_idx'].append(idx)
-        
+            elif dbpn.ndim == 3:  # Multiple doors case (x,256,4)
+                arch_features['dbpn'].extend([d for d in dbpn])
+                arch_features['dbpn_idx'].extend([idx] * len(dbpn))
+
         # Stack all window features into a single array of shape (N, 256, 4)
         arch_features['wbpn'] = np.stack(arch_features['wbpn'], axis=0).astype(np.float32)
         arch_features['wbpn_idx'] = np.array(arch_features['wbpn_idx'], dtype=np.int64)

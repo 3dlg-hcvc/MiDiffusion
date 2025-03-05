@@ -39,7 +39,8 @@ class DiffusionSceneLayout_Mixed(DiffusionSceneLayout_DDPM):
         # unpack sample_params
         room_layout_target = self.unpack_data(sample_params)
         device = room_layout_target.device  # Get the target device
-        dtype = self.feature_extractor.layers[0].weight.dtype
+        if self.room_mask_condition:
+            dtype = self.feature_extractor.layers[0].weight.dtype
         
         # unpack condition
         room_feature = None
