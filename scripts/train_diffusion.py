@@ -246,7 +246,8 @@ def main(argv):
                 # Move everything to device
                 for k, v in sample.items():
                     if not isinstance(v, list):
-                        sample[k] = v.to(device)
+                        sample[k] = torch.tensor(v).to(device)
+
                 batch_loss = validate_on_batch(network, sample, config)
                 StatsLogger.instance().print_progress(-1, b+1, batch_loss)
                 val_loss_total += batch_loss
